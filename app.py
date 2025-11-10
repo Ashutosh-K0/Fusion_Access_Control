@@ -70,32 +70,44 @@ def predict_face_emotion(image):
 # ----------------------------------------------------------
 # Helper: Analyze Voice (Speech + Emotion)
 # ----------------------------------------------------------
+from pydub import AudioSegment
+import soundfile as sf
+
 def analyze_voice(file_path):
     recognizer = sr.Recognizer()
     text = ""
-    
-    # --- Speech Recognition ---
+
+    # --- Step 1: Convert audio to pure WAV using PyDub ---
+    try:
+        audio = AudioSegment.from_file(file_path)
+        converted_path = file_path.replace(".wav", "_converted.wav")
+        audio.export(converted_path, format="wav")
+        file_path = converted_path
+    except Exception as e:
+        st.warning(f"⚠️ Could not convert audio: {e}")
+        return "", "unknown"
+
+    # --- Step 2: Speech Recognition ---
     try:
         with sr.AudioFile(file_path) as source:
             audio = recognizer.record(source)
         text = recognizer.recognize_google(audio).lower()
     except Exception:
         text = ""
-    
-    # --- Load Audio Safely ---
+
+    # --- Step 3: Load with Librosa (guaranteed clean WAV now) ---
     try:
         y, sr_rate = librosa.load(file_path, sr=None)
     except Exception:
-        # fallback for unsupported formats (Streamlit Cloud)
         try:
             y, sr_rate = sf.read(file_path)
             if y.ndim > 1:
-                y = y.mean(axis=1)  # Convert stereo to mono
+                y = y.mean(axis=1)
         except Exception as e:
             st.warning(f"⚠️ Could not process audio: {e}")
             return text, "unknown"
-    
-    # --- Simple Tone-Based Emotion ---
+
+    # --- Step 4: Simple Tone Analysis ---
     try:
         pitch = librosa.yin(y, 50, 500, sr=sr_rate)
         avg_pitch = np.mean(pitch)

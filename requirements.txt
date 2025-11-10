@@ -9,4 +9,5 @@ soundfile
 SpeechRecognition
 requests
 soundfile
+pydub
 ffmpeg-python
