@@ -9,4 +9,4 @@ soundfile
 SpeechRecognition
 requests
 streamlit-webrtc
-streamlit-audiorecorder
+streamlit-audio-recorder
