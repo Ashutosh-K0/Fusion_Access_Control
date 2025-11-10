@@ -1,180 +1,154 @@
-# -*- coding: utf-8 -*-
 # ==========================================================
-# 🔐 Fusion Access Control – Streamlit Cloud Stable Version
+# 🎯 Fusion Access Control (Streamlit Version)
 # ==========================================================
-
 import streamlit as st
+import cv2
 import numpy as np
 import librosa
-import soundfile as sf
-import requests
 import tempfile
-import datetime
-from difflib import SequenceMatcher
+import os
+import requests
+import speech_recognition as sr
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import LabelEncoder
+from difflib import SequenceMatcher
 from PIL import Image
-from pydub import AudioSegment
 
-# ==========================================================
-# 1️⃣ Setup & Constants
-# ==========================================================
-st.set_page_config(page_title="Fusion Access Control", page_icon="🔐", layout="centered")
-st.title("🔐 Multimodal Emotion + Voice Access Control")
-
+# ----------------------------------------------------------
+# Load Emotion Model
+# ----------------------------------------------------------
 @st.cache_resource
 def load_emotion_model():
     model = load_model("model.keras")
-    labels = ["neutral", "happy", "sad", "fear", "angry", "surprised", "disgust"]
-    le = LabelEncoder()
-    le.fit(labels)
-    return model, le
+    return model
 
-model, le = load_emotion_model()
+model = load_emotion_model()
 
+labels = ["neutral", "happy", "sad", "fear", "angry", "surprised", "disgust"]
+le = LabelEncoder()
+le.fit(labels)
 EMOJI_MAP = {
-    "neutral": "😐",
-    "happy": "🙂",
-    "sad": "😔",
-    "fear": "😨",
-    "angry": "😠",
-    "surprised": "😲",
-    "disgust": "🤢",
+    "neutral": "😐", "happy": "🙂", "sad": "😔",
+    "fear": "😨", "angry": "😠", "surprised": "😲", "disgust": "🤢"
 }
 
-ACCESS_PHRASE = "back home safe"
+# ----------------------------------------------------------
+# Constants
+# ----------------------------------------------------------
+ACCESS_PHRASE = "emotion alpha secure"
 SIMILARITY_THRESHOLD = 0.8
 TELEGRAM_BOT_TOKEN = "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho"
 TELEGRAM_CHAT_ID = "1636491839"
 
-# ==========================================================
-# 2️⃣ Helper Functions
-# ==========================================================
-def send_telegram_alert(status, emotion, similarity, img_path=None):
-    """Send alert + optional image to Telegram."""
-    time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    message = f"{status}\n🕒 {time_str}\n🧠 Emotion: {emotion}\n🔑 Phrase Match: {similarity*100:.2f}%"
+# ----------------------------------------------------------
+# Helper: Send Telegram Alert
+# ----------------------------------------------------------
+def send_telegram_alert(message):
     try:
-        text_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(text_url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
-        if img_path:
-            photo_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-            with open(img_path, "rb") as photo:
-                requests.post(photo_url, data={"chat_id": TELEGRAM_CHAT_ID}, files={"photo": photo})
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+        requests.post(url, data=data)
     except Exception as e:
-        st.error(f"⚠️ Telegram alert failed: {e}")
+        st.warning(f"⚠️ Telegram alert failed: {e}")
 
-
-def predict_emotion_from_image(image):
-    img = image.convert("L").resize((48, 48))
-    img_array = img_to_array(img) / 255.0
+# ----------------------------------------------------------
+# Helper: Predict Emotion from Image
+# ----------------------------------------------------------
+def predict_face_emotion(image):
+    image = image.convert("L")  # grayscale
+    image = image.resize((48, 48))
+    img_array = img_to_array(image) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
     pred = model.predict(img_array)
     label = le.inverse_transform([pred.argmax()])[0]
     conf = np.max(pred) * 100
-    return label, conf
+    emoji = EMOJI_MAP[label]
+    return label, conf, emoji
 
+# ----------------------------------------------------------
+# Helper: Analyze Voice (Speech + Emotion)
+# ----------------------------------------------------------
+def analyze_voice(file_path):
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(file_path) as source:
+            audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio).lower()
+    except Exception:
+        text = ""
 
+    # Simple tone-based voice emotion analysis
+    y, sr_rate = librosa.load(file_path, sr=None)
+    pitch = librosa.yin(y, 50, 500, sr=sr_rate)
+    avg_pitch = np.mean(pitch)
+    energy = np.mean(np.abs(y))
+    voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
+
+    return text, voice_emotion
+
+# ----------------------------------------------------------
+# Helper: Phrase Similarity
+# ----------------------------------------------------------
 def phrase_similarity(text1, text2):
     return SequenceMatcher(None, text1, text2).ratio()
 
-
-def speech_to_text_and_emotion(audio_path):
-    import speech_recognition as sr
-    recognizer = sr.Recognizer()
-    with sr.AudioFile(audio_path) as source:
-        audio = recognizer.record(source)
-
-    try:
-        text = recognizer.recognize_google(audio).lower()
-        st.write(f"🗣️ Detected phrase: {text}")
-    except Exception:
-        st.warning("⚠️ Speech recognition failed.")
-        text = ""
-
-    # Hidden tone analysis (not shown to user)
-    y, sr_rate = librosa.load(audio_path, sr=None)
-    try:
-        pitch = librosa.yin(y, 50, 500, sr=sr_rate)
-        avg_pitch = np.mean(pitch)
-    except Exception:
-        avg_pitch = 0
-    energy = np.mean(np.abs(y))
-    voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
-    return text, voice_emotion
-
-
-def fusion_decision(face_emotion, voice_emotion, phrase_sim, img_path=None):
-    st.subheader("🧠 Fusion Analysis")
-    st.write(f"**Face Emotion:** {face_emotion}")
-    st.write(f"**Phrase Similarity:** {phrase_sim*100:.2f}%")
-
-    if phrase_sim >= SIMILARITY_THRESHOLD and (
-        face_emotion in ["happy", "neutral"] and voice_emotion == "calm"
-    ):
-        st.success("✅ ACCESS GRANTED — Emotion & Voice Confirmed")
-        send_telegram_alert("✅ ACCESS GRANTED", face_emotion, phrase_sim, img_path)
+# ----------------------------------------------------------
+# Fusion Logic
+# ----------------------------------------------------------
+def fusion_decision(face_emotion, voice_emotion, similarity):
+    if similarity >= SIMILARITY_THRESHOLD and (face_emotion in ["happy", "neutral"] and voice_emotion == "calm"):
         return True
-    else:
-        st.error("🚫 ACCESS DENIED — Condition mismatch")
-        send_telegram_alert("🚫 ACCESS DENIED", face_emotion, phrase_sim, img_path)
-        return False
-
-
-def convert_to_wav(uploaded_audio):
-    """Convert uploaded audio (mp3, m4a, ogg) to WAV for analysis."""
-    temp_input = tempfile.NamedTemporaryFile(delete=False)
-    temp_input.write(uploaded_audio.read())
-    temp_input.flush()
-    temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-    try:
-        sound = AudioSegment.from_file(temp_input.name)
-        sound.export(temp_output, format="wav")
-        return temp_output
-    except Exception as e:
-        st.error(f"❌ Failed to convert audio: {e}")
-        return None
+    return False
 
 # ==========================================================
-# 3️⃣ Streamlit UI
+# Streamlit UI
 # ==========================================================
-st.header("🖼️ Upload Image for Emotion Analysis")
-uploaded_file = st.file_uploader("Upload a face image", type=["jpg", "jpeg", "png"])
+st.set_page_config(page_title="Fusion Access Control", page_icon="🔐", layout="centered")
+st.title("🔐 Fusion Access Control System")
+st.write("Combining Facial Emotion and Voice Phrase Verification for Secure Access")
 
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+# ------------------- Image Upload -------------------
+st.subheader("📷 Upload Your Face Image")
+uploaded_image = st.file_uploader("Upload an image file", type=["jpg", "jpeg", "png"])
 
+if uploaded_image:
+    image = Image.open(uploaded_image)
+    st.image(image, caption="Uploaded Image", use_container_width=True)
     if st.button("🔍 Analyze Emotion"):
-        label, conf = predict_emotion_from_image(image)
-        emoji = EMOJI_MAP[label]
-        st.success(f"🧠 Detected Emotion: {label.upper()} {emoji} ({conf:.2f}%)")
+        face_emotion, conf, emoji = predict_face_emotion(image)
+        st.success(f"🧠 Detected Emotion: **{face_emotion.upper()} {emoji} ({conf:.2f}%)**")
 
-        temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-        image.save(temp_img.name)
+        st.session_state["face_emotion"] = face_emotion
+        st.session_state["face_conf"] = conf
 
-        st.markdown("---")
-        st.header("🎙️ Upload Your Voice Sample (.wav / .mp3 / .m4a / .ogg)")
-        uploaded_audio = st.file_uploader("Upload voice file", type=["wav", "mp3", "m4a", "ogg"])
+# ------------------- Voice Upload -------------------
+st.markdown("---")
+st.subheader("🎙️ Upload Your Voice Sample (.wav / .mp3 / .m4a / .ogg)")
+uploaded_audio = st.file_uploader("Upload voice file", type=["wav", "mp3", "m4a", "ogg"])
 
-        if uploaded_audio:
-            converted_audio = convert_to_wav(uploaded_audio)
-            if converted_audio:
-                st.audio(converted_audio, format="audio/wav")
+if uploaded_audio is not None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
+        tmp_audio.write(uploaded_audio.read())
+        tmp_path = tmp_audio.name
 
-                try:
-                    text, voice_emotion = speech_to_text_and_emotion(converted_audio)
-                    if text.strip() == "":
-                        st.warning("⚠️ Could not detect any clear speech. Please upload a clearer audio file.")
-                    else:
-                        similarity = phrase_similarity(text, ACCESS_PHRASE)
-                        decision = fusion_decision(label, voice_emotion, similarity, temp_img.name)
+    st.audio(tmp_path)
 
-                        if decision:
-                            st.balloons()
-                            st.subheader("🔓 System Unlocked!")
-                        else:
-                            st.subheader("🔒 Access Locked.")
-                except Exception as e:
-                    st.error(f"❌ Error while processing audio: {e}")
+    if st.button("🔎 Analyze Voice & Grant Access"):
+        text, voice_emotion = analyze_voice(tmp_path)
+        similarity = phrase_similarity(text, ACCESS_PHRASE)
+
+        st.info(f"🗣️ Detected Phrase: `{text or 'Unrecognized'}`")
+        st.info(f"🔑 Access Phrase Match: **{similarity*100:.2f}%**")
+
+        face_emotion = st.session_state.get("face_emotion", "neutral")
+        decision = fusion_decision(face_emotion, voice_emotion, similarity)
+
+        if decision:
+            st.success("✅ ACCESS GRANTED — System Unlocked!")
+            send_telegram_alert("✅ ACCESS GRANTED — User authenticated successfully.")
+        else:
+            st.error("🚫 ACCESS DENIED — Emotion or Voice mismatch.")
+            send_telegram_alert("🚫 ACCESS DENIED — Authentication failed.")
+
+    os.remove(tmp_path)
