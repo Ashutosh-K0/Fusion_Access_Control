@@ -8,7 +8,6 @@ librosa
 sounddevice
 soundfile
 SpeechRecognition
-pyaudio
 requests
 streamlit-webrtc
 streamlit-audiorecorder
