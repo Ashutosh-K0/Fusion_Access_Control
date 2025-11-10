@@ -1,6 +1,7 @@
 # ==========================================================
 # 🎯 Fusion Access Control (Streamlit Version)
 # ==========================================================
+import soundfile as sf
 import streamlit as st
 import cv2
 import numpy as np
@@ -71,20 +72,38 @@ def predict_face_emotion(image):
 # ----------------------------------------------------------
 def analyze_voice(file_path):
     recognizer = sr.Recognizer()
+    text = ""
+    
+    # --- Speech Recognition ---
     try:
         with sr.AudioFile(file_path) as source:
             audio = recognizer.record(source)
         text = recognizer.recognize_google(audio).lower()
     except Exception:
         text = ""
+    
+    # --- Load Audio Safely ---
+    try:
+        y, sr_rate = librosa.load(file_path, sr=None)
+    except Exception:
+        # fallback for unsupported formats (Streamlit Cloud)
+        try:
+            y, sr_rate = sf.read(file_path)
+            if y.ndim > 1:
+                y = y.mean(axis=1)  # Convert stereo to mono
+        except Exception as e:
+            st.warning(f"⚠️ Could not process audio: {e}")
+            return text, "unknown"
+    
+    # --- Simple Tone-Based Emotion ---
+    try:
+        pitch = librosa.yin(y, 50, 500, sr=sr_rate)
+        avg_pitch = np.mean(pitch)
+    except Exception:
+        avg_pitch = 0
 
-    # Simple tone-based voice emotion analysis
-    y, sr_rate = librosa.load(file_path, sr=None)
-    pitch = librosa.yin(y, 50, 500, sr=sr_rate)
-    avg_pitch = np.mean(pitch)
     energy = np.mean(np.abs(y))
     voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
-
     return text, voice_emotion
 
 # ----------------------------------------------------------

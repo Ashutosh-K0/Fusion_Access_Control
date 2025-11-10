@@ -8,3 +8,5 @@ librosa
 soundfile
 SpeechRecognition
 requests
+soundfile
+ffmpeg-python
