@@ -6,7 +6,7 @@ numpy
 pillow
 librosa
 soundfile
-SpeechRecognition
 requests
 pydub
+openai-whisper
 ffmpeg-python
