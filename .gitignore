@@ -1,102 +1,12 @@
-# =====================================================
-# 🔐 Fusion Access Control – Git Ignore List
-# =====================================================
-
-# ---- Python Bytecode ----
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# ---- Environment / Virtual Env ----
-.venv/
-env/
-venv/
-ENV/
-*.env
-*.venv
-
-# ---- Jupyter / Colab / Cache ----
-.ipynb_checkpoints/
-*.ipynb_save
-*.ipynb_checkpoints
-.DS_Store
-
-# ---- Model & Large Files ----
-*.h5
-*.hdf5
-*.keras
-*.tflite
-*.ckpt
-*.pb
-*.pt
-*.onnx
-*.weights
-*.zip
-
-# ---- Dataset / Input / Output ----
-dataset/
-data/
-inputs/
-outputs/
-screenshots/
-recordings/
+*.tmp
 *.wav
 *.mp3
 *.m4a
 *.ogg
-*.csv
-*.json
-
-# ---- Logs & Temporary Files ----
-*.log
-*.tmp
-*.bak
-*.swp
-*.swo
-*.lock
-*.pickle
-
-# ---- Streamlit Specific ----
-.streamlit/
-__pycache__/
-*.pyc
-*.pyo
-*.log
-secrets.toml
-credentials.toml
-
-# ---- System Files ----
-Thumbs.db
-ehthumbs.db
-desktop.ini
+model.keras
+.env
 .DS_Store
-
-# ---- Backup & Local Config ----
-.vscode/
-.idea/
-*.code-workspace
-*.bak
-*.old
-
-# ---- Ignore Local Model Folder (Optional) ----
-/models/
-*.model
-
-# ---- Git LFS / Large File Artifacts ----
-*.lfs
-*.tar
-*.tar.gz
-
-# ---- Temp Image / Cache ----
-temp/
-tmp/
-cache/
-*.png
-*.jpg
-*.jpeg
-
-# ---- Node / Web Artifacts (future-proofing) ----
-node_modules/
-package-lock.json
-yarn.lock
