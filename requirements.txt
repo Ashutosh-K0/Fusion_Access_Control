@@ -5,7 +5,6 @@ scikit-learn
 numpy
 pillow
 librosa
-sounddevice
 soundfile
 SpeechRecognition
 requests

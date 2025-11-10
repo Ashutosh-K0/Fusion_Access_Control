@@ -1,60 +1,68 @@
 # -*- coding: utf-8 -*-
 # ==========================================================
-# 🎯 Streamlit: Multimodal Access Control (Image + Voice + Telegram)
+# 🔐 Fusion Access Control – Streamlit Cloud Version
 # ==========================================================
 
 import streamlit as st
-import cv2
 import numpy as np
-import sounddevice as sd
-import soundfile as sf
 import librosa
+import soundfile as sf
 import requests
-import datetime
 import tempfile
-import speech_recognition as sr
+import datetime
+from difflib import SequenceMatcher
 from tensorflow.keras.preprocessing.image import img_to_array, load_img
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import LabelEncoder
-from difflib import SequenceMatcher
 from PIL import Image
+from streamlit_audiorecorder import audiorecorder
 
 # ==========================================================
-# 1️⃣ Setup
+# 1️⃣ Setup & Constants
 # ==========================================================
-st.set_page_config(page_title="Multimodal Access Control", page_icon="🔐", layout="centered")
-st.title("🔐 Multimodal Emotion-Based Access Control System")
+st.set_page_config(page_title="Fusion Access Control", page_icon="🔐", layout="centered")
+st.title("🔐 Multimodal Emotion + Voice Access Control")
 
 # Load model once
 @st.cache_resource
 def load_emotion_model():
-    model = load_model('model.keras')
+    model = load_model("model.keras")
     labels = ["neutral", "happy", "sad", "fear", "angry", "surprised", "disgust"]
     le = LabelEncoder()
     le.fit(labels)
     return model, le
 
 model, le = load_emotion_model()
+
 EMOJI_MAP = {
-    "neutral": "😐", "happy": "🙂", "sad": "😔",
-    "fear": "😨", "angry": "😠", "surprised": "😲", "disgust": "🤢"
+    "neutral": "😐",
+    "happy": "🙂",
+    "sad": "😔",
+    "fear": "😨",
+    "angry": "😠",
+    "surprised": "😲",
+    "disgust": "🤢",
 }
 
 ACCESS_PHRASE = "emotion alpha secure"
 SIMILARITY_THRESHOLD = 0.8
-SPEECH_DURATION = 5
 
-# Telegram config
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"
+# Telegram Bot (replace these)
+TELEGRAM_BOT_TOKEN = "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho"
+TELEGRAM_CHAT_ID = "1636491839"
+
 
 # ==========================================================
 # 2️⃣ Helper Functions
 # ==========================================================
 def send_telegram_alert(status, emotion, similarity, img_path=None):
-    """Send Telegram alert with photo."""
+    """Send alert + optional image to Telegram."""
     time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    phrase_text = f"🔑 Phrase Match: {float(similarity)*100:.2f}%" if isinstance(similarity, (int, float)) else "🔑 Phrase Match: N/A"
+    phrase_text = (
+        f"🔑 Phrase Match: {float(similarity)*100:.2f}%"
+        if isinstance(similarity, (int, float))
+        else "🔑 Phrase Match: N/A"
+    )
     message = f"{status}\n🕒 {time_str}\n🧠 Emotion: {emotion}\n{phrase_text}"
 
     try:
@@ -65,9 +73,10 @@ def send_telegram_alert(status, emotion, similarity, img_path=None):
             photo_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
             with open(img_path, "rb") as photo:
                 requests.post(photo_url, data={"chat_id": TELEGRAM_CHAT_ID}, files={"photo": photo})
-        st.success("✅ Telegram Alert Sent!")
+        st.toast("✅ Telegram alert sent!")
     except Exception as e:
-        st.error(f"❌ Telegram Alert Failed: {e}")
+        st.error(f"⚠️ Telegram alert failed: {e}")
+
 
 def predict_emotion_from_image(image):
     img = image.convert("L").resize((48, 48))
@@ -78,16 +87,16 @@ def predict_emotion_from_image(image):
     conf = np.max(pred) * 100
     return label, conf
 
-def record_voice(filename="voice_input.wav", duration=SPEECH_DURATION, sr_rate=16000):
-    st.info("🎙️ Recording for 5 seconds... Please speak your code phrase clearly.")
-    voice_data = sd.rec(int(duration * sr_rate), samplerate=sr_rate, channels=1)
-    sd.wait()
-    sf.write(filename, voice_data.flatten(), sr_rate)
-    return filename
 
-def speech_to_text_and_emotion(filename):
+def phrase_similarity(text1, text2):
+    return SequenceMatcher(None, text1, text2).ratio()
+
+
+def speech_to_text_and_emotion(audio_path):
+    import speech_recognition as sr
+
     recognizer = sr.Recognizer()
-    with sr.AudioFile(filename) as source:
+    with sr.AudioFile(audio_path) as source:
         audio = recognizer.record(source)
 
     try:
@@ -97,8 +106,8 @@ def speech_to_text_and_emotion(filename):
         st.warning("⚠️ Speech recognition failed.")
         text = ""
 
-    # Hidden tone analysis
-    y, sr_rate = librosa.load(filename, sr=None)
+    # hidden voice tone analysis
+    y, sr_rate = librosa.load(audio_path, sr=None)
     try:
         pitch = librosa.yin(y, 50, 500, sr=sr_rate)
         avg_pitch = np.mean(pitch)
@@ -108,15 +117,15 @@ def speech_to_text_and_emotion(filename):
     voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
     return text, voice_emotion
 
-def phrase_similarity(text1, text2):
-    return SequenceMatcher(None, text1, text2).ratio()
 
 def fusion_decision(face_emotion, voice_emotion, phrase_sim, img_path=None):
     st.subheader("🧠 Fusion Analysis")
     st.write(f"**Face Emotion:** {face_emotion}")
     st.write(f"**Phrase Similarity:** {phrase_sim*100:.2f}%")
 
-    if phrase_sim >= SIMILARITY_THRESHOLD and (face_emotion in ["happy", "neutral"] and voice_emotion == "calm"):
+    if phrase_sim >= SIMILARITY_THRESHOLD and (
+        face_emotion in ["happy", "neutral"] and voice_emotion == "calm"
+    ):
         st.success("✅ ACCESS GRANTED — Emotion & Voice Confirmed")
         send_telegram_alert("✅ ACCESS GRANTED", face_emotion, phrase_sim, img_path)
         return True
@@ -125,12 +134,12 @@ def fusion_decision(face_emotion, voice_emotion, phrase_sim, img_path=None):
         send_telegram_alert("🚫 ACCESS DENIED", face_emotion, phrase_sim, img_path)
         return False
 
+
 # ==========================================================
 # 3️⃣ Streamlit UI
 # ==========================================================
-st.markdown("---")
 st.header("🖼️ Upload Image for Emotion Analysis")
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload a face image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
@@ -141,16 +150,21 @@ if uploaded_file is not None:
         emoji = EMOJI_MAP[label]
         st.success(f"🧠 Detected Emotion: {label.upper()} {emoji} ({conf:.2f}%)")
 
-        # Save temporarily for Telegram
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
         image.save(temp_img.name)
 
-        # Voice Recording Section
         st.markdown("---")
-        st.header("🎙️ Record Your Voice")
-        if st.button("🎤 Start Voice Recording"):
-            voice_file = record_voice()
-            text, voice_emotion = speech_to_text_and_emotion(voice_file)
+        st.header("🎙️ Record or Upload Voice Sample")
+        st.info("Click **Record** to start and **Stop** to finish (5 s recommended).")
+
+        audio = audiorecorder("🎤 Record", "🛑 Stop")
+        if len(audio) > 0:
+            # Convert to WAV and save
+            wav_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+            sf.write(wav_path, audio.tobytes(), 44100, format="RAW", subtype="PCM_16")
+            st.audio(audio.tobytes(), format="audio/wav")
+
+            text, voice_emotion = speech_to_text_and_emotion(wav_path)
             similarity = phrase_similarity(text, ACCESS_PHRASE)
             decision = fusion_decision(label, voice_emotion, similarity, temp_img.name)
 
