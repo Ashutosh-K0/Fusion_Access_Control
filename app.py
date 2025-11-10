@@ -1,5 +1,5 @@
 # ==========================================================
-# 🔐 Fusion Access Control System – Streamlit Version (v3)
+# 🔐 Fusion Access Control System – Streamlit Version (Final)
 # ==========================================================
 import streamlit as st
 import cv2
@@ -29,7 +29,7 @@ SIMILARITY_THRESHOLD = 0.8
 TELEGRAM_BOT_TOKEN = "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho"
 TELEGRAM_CHAT_ID = "1636491839"
 
-# ---- Emotion Model ----
+# ---- Load Emotion Model ----
 @st.cache_resource
 def load_emotion_model():
     model = load_model("model.keras")
@@ -54,16 +54,16 @@ def send_telegram_alert(summary_text, image_path=None):
     try:
         # send text message
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT_ID, "text": summary_text}
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": summary_text, "parse_mode": "Markdown"}
         requests.post(url, data=data)
 
-        # send image (if available)
+        # send image if available
         if image_path and os.path.exists(image_path):
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
             with open(image_path, "rb") as photo:
                 requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID}, files={"photo": photo})
-    except Exception as e:
-        st.warning(f"⚠️ Telegram alert failed: {e}")
+    except Exception:
+        pass  # Silently ignore Telegram errors in UI
 
 # ---- Predict Emotion from Uploaded Image ----
 def predict_face_emotion(image):
@@ -82,15 +82,15 @@ def analyze_voice(file_path):
     recognizer = sr.Recognizer()
     text = ""
 
-    # Step 1: Convert all audio to standard WAV format
+    # Step 1: Try converting audio safely (ignore ffprobe warning)
     try:
         audio = AudioSegment.from_file(file_path)
         converted_path = file_path.replace(".wav", "_converted.wav")
         audio.export(converted_path, format="wav")
         file_path = converted_path
-    except Exception as e:
-        st.warning(f"⚠️ Could not convert audio: {e}")
-        return "", "unknown"
+    except Exception:
+        # silently ignore any conversion issue
+        pass
 
     # Step 2: Speech-to-Text
     try:
@@ -100,7 +100,7 @@ def analyze_voice(file_path):
     except Exception:
         text = ""
 
-    # Step 3: Voice Emotion (basic tone analysis)
+    # Step 3: Voice Emotion
     try:
         y, sr_rate = librosa.load(file_path, sr=None)
     except Exception:
@@ -108,8 +108,7 @@ def analyze_voice(file_path):
             y, sr_rate = sf.read(file_path)
             if y.ndim > 1:
                 y = y.mean(axis=1)
-        except Exception as e:
-            st.warning(f"⚠️ Could not process audio: {e}")
+        except Exception:
             return text, "unknown"
 
     try:
@@ -120,14 +119,13 @@ def analyze_voice(file_path):
 
     energy = np.mean(np.abs(y))
     voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
-
     return text, voice_emotion
 
-# ---- Similarity Calculation ----
+# ---- Phrase Similarity ----
 def phrase_similarity(text1, text2):
     return SequenceMatcher(None, text1, text2).ratio()
 
-# ---- Fusion Logic ----
+# ---- Fusion Decision ----
 def fusion_decision(face_emotion, voice_emotion, similarity):
     if similarity >= SIMILARITY_THRESHOLD and (face_emotion in ["happy", "neutral"] and voice_emotion == "calm"):
         return True
@@ -154,7 +152,7 @@ if uploaded_image:
         face_emotion, conf, emoji = predict_face_emotion(image)
         st.success(f"🧠 Detected Emotion: **{face_emotion.upper()} {emoji} ({conf:.2f}%)**")
 
-        # Save temporarily for Telegram
+        # Save for Telegram
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_img:
             image.save(temp_img.name)
             image_path = temp_img.name
@@ -181,24 +179,25 @@ if uploaded_audio is not None:
         face_emotion = st.session_state.get("face_emotion", "neutral")
         image_path = st.session_state.get("image_path", None)
 
+        # ---- Show Recognized Phrase ----
         st.info(f"🗣️ Detected Phrase: `{text or 'Unrecognized'}`")
         st.info(f"🔑 Access Phrase Match: **{similarity*100:.2f}%**")
 
         decision = fusion_decision(face_emotion, voice_emotion, similarity)
 
-        # ---- Summary for Telegram ----
+        # ---- Telegram Summary ----
         summary = f"""
-🔒 **Fusion Access Control Report**
+**🔐 Fusion Access Log**
 
-🧠 Face Emotion: {face_emotion.upper() if face_emotion else 'UNKNOWN'}
-🎧 Voice Emotion: {voice_emotion.upper()}
-🗣️ Detected Phrase: {text or 'Unrecognized'}
-🔑 Phrase Similarity: {similarity*100:.2f}%
-📋 Decision: {"✅ ACCESS GRANTED" if decision else "🚫 ACCESS DENIED"}
+🧠 *Face Emotion:* {face_emotion.upper() if face_emotion else 'UNKNOWN'}
+🎧 *Voice Emotion:* {voice_emotion.upper()}
+🗣️ *Detected Phrase:* {text or 'Unrecognized'}
+🔑 *Phrase Match:* {similarity*100:.2f}%
+📋 *Final Decision:* {"✅ ACCESS GRANTED" if decision else "🚫 ACCESS DENIED"}
 """
         send_telegram_alert(summary, image_path)
 
-        # ---- Display in App ----
+        # ---- Display Result ----
         if decision:
             st.success("✅ ACCESS GRANTED — System Unlocked!")
         else:
