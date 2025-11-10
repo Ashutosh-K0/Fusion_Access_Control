@@ -7,4 +7,5 @@ pillow
 librosa
 soundfile
 SpeechRecognition
+pydub
 requests

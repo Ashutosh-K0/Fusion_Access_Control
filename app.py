@@ -15,6 +15,7 @@ from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import LabelEncoder
 from PIL import Image
+from pydub import AudioSegment
 
 # ==========================================================
 # 1️⃣ Setup & Constants
@@ -42,7 +43,7 @@ EMOJI_MAP = {
     "disgust": "🤢",
 }
 
-ACCESS_PHRASE = "emotion alpha secure"
+ACCESS_PHRASE = "back home safe"
 SIMILARITY_THRESHOLD = 0.8
 TELEGRAM_BOT_TOKEN = "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho"
 TELEGRAM_CHAT_ID = "1636491839"
@@ -92,7 +93,7 @@ def speech_to_text_and_emotion(audio_path):
         st.warning("⚠️ Speech recognition failed.")
         text = ""
 
-    # Basic hidden tone analysis
+    # Hidden tone analysis (not shown to user)
     y, sr_rate = librosa.load(audio_path, sr=None)
     try:
         pitch = librosa.yin(y, 50, 500, sr=sr_rate)
@@ -121,6 +122,20 @@ def fusion_decision(face_emotion, voice_emotion, phrase_sim, img_path=None):
         return False
 
 
+def convert_to_wav(uploaded_audio):
+    """Convert uploaded audio (mp3, m4a, ogg) to WAV for analysis."""
+    temp_input = tempfile.NamedTemporaryFile(delete=False)
+    temp_input.write(uploaded_audio.read())
+    temp_input.flush()
+    temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+    try:
+        sound = AudioSegment.from_file(temp_input.name)
+        sound.export(temp_output, format="wav")
+        return temp_output
+    except Exception as e:
+        st.error(f"❌ Failed to convert audio: {e}")
+        return None
+
 # ==========================================================
 # 3️⃣ Streamlit UI
 # ==========================================================
@@ -140,21 +155,26 @@ if uploaded_file:
         image.save(temp_img.name)
 
         st.markdown("---")
-        st.header("🎙️ Upload Your Voice Sample (.wav)")
+        st.header("🎙️ Upload Your Voice Sample (.wav / .mp3 / .m4a / .ogg)")
+        uploaded_audio = st.file_uploader("Upload voice file", type=["wav", "mp3", "m4a", "ogg"])
 
-        uploaded_audio = st.file_uploader("Upload audio", type=["wav"])
         if uploaded_audio:
-            temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            temp_audio.write(uploaded_audio.read())
+            converted_audio = convert_to_wav(uploaded_audio)
+            if converted_audio:
+                st.audio(converted_audio, format="audio/wav")
 
-            st.audio(temp_audio.name, format="audio/wav")
+                try:
+                    text, voice_emotion = speech_to_text_and_emotion(converted_audio)
+                    if text.strip() == "":
+                        st.warning("⚠️ Could not detect any clear speech. Please upload a clearer audio file.")
+                    else:
+                        similarity = phrase_similarity(text, ACCESS_PHRASE)
+                        decision = fusion_decision(label, voice_emotion, similarity, temp_img.name)
 
-            text, voice_emotion = speech_to_text_and_emotion(temp_audio.name)
-            similarity = phrase_similarity(text, ACCESS_PHRASE)
-            decision = fusion_decision(label, voice_emotion, similarity, temp_img.name)
-
-            if decision:
-                st.balloons()
-                st.subheader("🔓 System Unlocked!")
-            else:
-                st.subheader("🔒 Access Locked.")
+                        if decision:
+                            st.balloons()
+                            st.subheader("🔓 System Unlocked!")
+                        else:
+                            st.subheader("🔒 Access Locked.")
+                except Exception as e:
+                    st.error(f"❌ Error while processing audio: {e}")
