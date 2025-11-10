@@ -1,0 +1,14 @@
+streamlit
+tensorflow
+opencv-python-headless
+scikit-learn
+numpy
+pillow
+librosa
+sounddevice
+soundfile
+SpeechRecognition
+pyaudio
+requests
+streamlit-webrtc
+streamlit-audiorecorder
