@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # ==========================================================
-# 🔐 Fusion Access Control – Streamlit Cloud Version
+# 🔐 Fusion Access Control – Streamlit Cloud Stable Version
 # ==========================================================
 
 import streamlit as st
@@ -11,11 +11,10 @@ import requests
 import tempfile
 import datetime
 from difflib import SequenceMatcher
-from tensorflow.keras.preprocessing.image import img_to_array, load_img
+from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import LabelEncoder
 from PIL import Image
-from streamlit_audiorecorder import audiorecorder
 
 # ==========================================================
 # 1️⃣ Setup & Constants
@@ -23,7 +22,6 @@ from streamlit_audiorecorder import audiorecorder
 st.set_page_config(page_title="Fusion Access Control", page_icon="🔐", layout="centered")
 st.title("🔐 Multimodal Emotion + Voice Access Control")
 
-# Load model once
 @st.cache_resource
 def load_emotion_model():
     model = load_model("model.keras")
@@ -46,11 +44,8 @@ EMOJI_MAP = {
 
 ACCESS_PHRASE = "emotion alpha secure"
 SIMILARITY_THRESHOLD = 0.8
-
-# Telegram Bot (replace these)
 TELEGRAM_BOT_TOKEN = "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho"
 TELEGRAM_CHAT_ID = "1636491839"
-
 
 # ==========================================================
 # 2️⃣ Helper Functions
@@ -58,22 +53,14 @@ TELEGRAM_CHAT_ID = "1636491839"
 def send_telegram_alert(status, emotion, similarity, img_path=None):
     """Send alert + optional image to Telegram."""
     time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    phrase_text = (
-        f"🔑 Phrase Match: {float(similarity)*100:.2f}%"
-        if isinstance(similarity, (int, float))
-        else "🔑 Phrase Match: N/A"
-    )
-    message = f"{status}\n🕒 {time_str}\n🧠 Emotion: {emotion}\n{phrase_text}"
-
+    message = f"{status}\n🕒 {time_str}\n🧠 Emotion: {emotion}\n🔑 Phrase Match: {similarity*100:.2f}%"
     try:
         text_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         requests.post(text_url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
-
         if img_path:
             photo_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
             with open(img_path, "rb") as photo:
                 requests.post(photo_url, data={"chat_id": TELEGRAM_CHAT_ID}, files={"photo": photo})
-        st.toast("✅ Telegram alert sent!")
     except Exception as e:
         st.error(f"⚠️ Telegram alert failed: {e}")
 
@@ -94,7 +81,6 @@ def phrase_similarity(text1, text2):
 
 def speech_to_text_and_emotion(audio_path):
     import speech_recognition as sr
-
     recognizer = sr.Recognizer()
     with sr.AudioFile(audio_path) as source:
         audio = recognizer.record(source)
@@ -106,7 +92,7 @@ def speech_to_text_and_emotion(audio_path):
         st.warning("⚠️ Speech recognition failed.")
         text = ""
 
-    # hidden voice tone analysis
+    # Basic hidden tone analysis
     y, sr_rate = librosa.load(audio_path, sr=None)
     try:
         pitch = librosa.yin(y, 50, 500, sr=sr_rate)
@@ -141,7 +127,7 @@ def fusion_decision(face_emotion, voice_emotion, phrase_sim, img_path=None):
 st.header("🖼️ Upload Image for Emotion Analysis")
 uploaded_file = st.file_uploader("Upload a face image", type=["jpg", "jpeg", "png"])
 
-if uploaded_file is not None:
+if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
@@ -154,17 +140,16 @@ if uploaded_file is not None:
         image.save(temp_img.name)
 
         st.markdown("---")
-        st.header("🎙️ Record or Upload Voice Sample")
-        st.info("Click **Record** to start and **Stop** to finish (5 s recommended).")
+        st.header("🎙️ Upload Your Voice Sample (.wav)")
 
-        audio = audiorecorder("🎤 Record", "🛑 Stop")
-        if len(audio) > 0:
-            # Convert to WAV and save
-            wav_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-            sf.write(wav_path, audio.tobytes(), 44100, format="RAW", subtype="PCM_16")
-            st.audio(audio.tobytes(), format="audio/wav")
+        uploaded_audio = st.file_uploader("Upload audio", type=["wav"])
+        if uploaded_audio:
+            temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            temp_audio.write(uploaded_audio.read())
 
-            text, voice_emotion = speech_to_text_and_emotion(wav_path)
+            st.audio(temp_audio.name, format="audio/wav")
+
+            text, voice_emotion = speech_to_text_and_emotion(temp_audio.name)
             similarity = phrase_similarity(text, ACCESS_PHRASE)
             decision = fusion_decision(label, voice_emotion, similarity, temp_img.name)
 
