@@ -8,7 +8,15 @@ import librosa
 import tempfile
 import os
 import requests
-import whisper
+
+# --- fix for Streamlit Cloud whisper import ---
+try:
+    import whisper
+except ImportError:
+    st.warning("Installing Whisper runtime dependency, please wait...")
+    os.system("pip install -q openai-whisper")
+    import whisper
+
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import LabelEncoder
