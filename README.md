@@ -108,7 +108,6 @@ pydub
 ffmpeg-python
 pandas
 ```
-
 ---
 
 ## 🧩 Future Enhancements
