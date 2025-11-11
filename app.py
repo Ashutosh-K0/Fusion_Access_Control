@@ -1,53 +1,47 @@
-# ==========================================================
-# 🔐 Fusion Access Control – Hugging Face Spaces Version
-# ==========================================================
+# ==============================================================
+# 🔐 Multimodal Access Control System — Stable Local Version
+# ==============================================================
+
 import streamlit as st
 import cv2
 import numpy as np
-import librosa
+import sounddevice as sd
+import soundfile as sf
 import tempfile
 import os
-import requests
+import pandas as pd
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import LabelEncoder
 from difflib import SequenceMatcher
+import speech_recognition as sr
+import librosa
+import requests
 from PIL import Image
-from pydub import AudioSegment
-import soundfile as sf
+from datetime import datetime
 
-# --- Whisper Import (OpenAI) ---
-try:
-    import whisper
-except ImportError:
-    os.system("pip install -q openai-whisper")
-    import whisper
-
-# ==========================================================
+# ==============================================================
 # 1️⃣ Setup & Constants
-# ==========================================================
-st.set_page_config(page_title="Fusion Access Control", page_icon="🔐", layout="centered")
+# ==============================================================
 
-ACCESS_PHRASE = "emotion alpha secure"
-SIMILARITY_THRESHOLD = 0.8
+st.set_page_config(page_title="Fusion Access Control", page_icon="🔐", layout="wide")
+st.title("🔐 Fusion Access Control System")
+st.markdown("Combining **Facial Emotion** 🧠 and **Voice Phrase** 🎙️ for secure access verification.")
 
-# Telegram configuration (set as Secrets in Hugging Face)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "1636491839")
+# --------------------------------------------------------------
+# Telegram Configuration (set via environment or inline)
+# --------------------------------------------------------------
+BOT_TOKEN = os.getenv("8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho") or "8550965886:AAFf0jyhz4j3j1aO_8nMlW8pqsfpB4OFNho"
+CHAT_ID = os.getenv("1636491839") or "1636491839"
 
-# ==========================================================
-# 2️⃣ Load Models
-# ==========================================================
+# --------------------------------------------------------------
+# Model & Constants
+# --------------------------------------------------------------
 @st.cache_resource
 def load_emotion_model():
     return load_model("model.keras")
 
-@st.cache_resource
-def load_whisper_model():
-    return whisper.load_model("base")
-
-emotion_model = load_emotion_model()
-whisper_model = load_whisper_model()
+model = load_emotion_model()
 
 labels = ["neutral", "happy", "sad", "fear", "angry", "surprised", "disgust"]
 le = LabelEncoder()
@@ -57,138 +51,198 @@ EMOJI_MAP = {
     "fear": "😨", "angry": "😠", "surprised": "😲", "disgust": "🤢"
 }
 
-# ==========================================================
-# 3️⃣ Helper Functions
-# ==========================================================
-def send_telegram_alert(summary_text, image_path=None):
-    """Send access summary & image to Telegram"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": summary_text, "parse_mode": "Markdown"}
-        )
-        if image_path and os.path.exists(image_path):
-            with open(image_path, "rb") as photo:
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
-                    data={"chat_id": TELEGRAM_CHAT_ID},
-                    files={"photo": photo}
-                )
-    except Exception as e:
-        print(f"[ERROR] Telegram send failed: {e}")
+ACCESS_PHRASE = "emotion alpha secure"
+SIMILARITY_THRESHOLD = 0.8
+LOG_FILE = "access_log.csv"
 
-def predict_face_emotion(image):
-    """Predict emotion from uploaded image"""
-    image = image.convert("L")
-    image = image.resize((48, 48))
-    img_array = img_to_array(image) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
-    pred = emotion_model.predict(img_array)
-    label = le.inverse_transform([pred.argmax()])[0]
-    conf = np.max(pred) * 100
-    emoji = EMOJI_MAP[label]
-    return label, conf, emoji
+# ==============================================================
+# 2️⃣ Helper Functions
+# ==============================================================
+
+def send_telegram_alert(message, image_path=None):
+    """Send alert to Telegram with optional image"""
+    try:
+        if BOT_TOKEN and CHAT_ID:
+            # Send text
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data={"chat_id": CHAT_ID, "text": message},
+            )
+            # Send photo
+            if image_path and os.path.exists(image_path):
+                with open(image_path, "rb") as photo:
+                    requests.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                        data={"chat_id": CHAT_ID},
+                        files={"photo": photo},
+                    )
+    except Exception as e:
+        st.warning(f"⚠️ Telegram alert failed: {e}")
+
+def record_voice(duration=5, sr_rate=16000):
+    """Record voice for a set duration"""
+    st.info(f"🎙️ Recording for {duration} seconds... Speak your code phrase now!")
+    voice_data = sd.rec(int(duration * sr_rate), samplerate=sr_rate, channels=1)
+    sd.wait()
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    sf.write(temp_file.name, voice_data.flatten(), sr_rate)
+    st.success("✅ Voice recorded successfully!")
+    return temp_file.name
+
+def phrase_similarity(text1, text2):
+    """Compute similarity between two phrases"""
+    return SequenceMatcher(None, text1, text2).ratio()
 
 def analyze_voice(file_path):
-    """Transcribe voice & estimate tone using Whisper"""
+    """Analyze voice emotion + speech-to-text"""
+    recognizer = sr.Recognizer()
     try:
-        audio = AudioSegment.from_file(file_path)
-        wav_path = file_path.replace(".mp3", ".wav")
-        audio.export(wav_path, format="wav")
-        file_path = wav_path
-    except Exception:
-        pass
-
-    try:
-        result = whisper_model.transcribe(file_path)
-        text = result["text"].strip().lower()
-    except Exception:
+        with sr.AudioFile(file_path) as src:
+            audio = recognizer.record(src)
+            text = recognizer.recognize_google(audio).lower()
+            st.info(f"🗣️ Detected Phrase: **{text}**")
+    except Exception as e:
+        st.warning(f"⚠️ Speech recognition failed: {e}")
         text = ""
 
     try:
         y, sr_rate = librosa.load(file_path, sr=None)
+        energy = np.mean(np.abs(y))
+        avg_pitch = np.mean(librosa.yin(y, 50, 500, sr=sr_rate))
+        voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
     except Exception:
-        try:
-            y, sr_rate = sf.read(file_path)
-            if y.ndim > 1:
-                y = y.mean(axis=1)
-        except Exception:
-            return text, "unknown"
-
-    try:
-        pitch = librosa.yin(y, 50, 500, sr=sr_rate)
-        avg_pitch = np.mean(pitch)
-    except Exception:
-        avg_pitch = 0
-    energy = np.mean(np.abs(y))
-    voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
+        voice_emotion = "unknown"
 
     return text, voice_emotion
 
-def phrase_similarity(text1, text2):
-    return SequenceMatcher(None, text1, text2).ratio()
+def log_access(emotion, phrase, similarity, decision):
+    """Append access attempt to CSV log"""
+    data = {
+        "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        "Emotion": [emotion],
+        "Phrase": [phrase],
+        "Match%": [round(similarity * 100, 2)],
+        "AccessDecision": [decision],
+    }
+    df = pd.DataFrame(data)
+    if os.path.exists(LOG_FILE):
+        df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+    else:
+        df.to_csv(LOG_FILE, index=False)
 
-def fusion_decision(face_emotion, voice_emotion, similarity):
-    return similarity >= SIMILARITY_THRESHOLD and (face_emotion in ["happy", "neutral"] and voice_emotion == "calm")
+# ==============================================================
+# 3️⃣ Facial Emotion Detection (with Live Camera + Retake)
+# ==============================================================
 
-# ==========================================================
-# 4️⃣ Streamlit Interface
-# ==========================================================
-st.title("🔐 Fusion Access Control System")
-st.caption("Facial Emotion Recognition + Whisper Speech Verification + Telegram Alerts")
+st.subheader("📸 Step 1: Capture Your Face Image (Live)")
 
-# -------- FACE UPLOAD --------
-st.subheader("📷 Upload Your Face Image")
-uploaded_image = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
-if uploaded_image:
-    image = Image.open(uploaded_image)
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+# Initialize session variables
+if "face_emotion" not in st.session_state:
+    st.session_state["face_emotion"] = None
+if "face_image_path" not in st.session_state:
+    st.session_state["face_image_path"] = None
+if "captured_image" not in st.session_state:
+    st.session_state["captured_image"] = None
+if "photo_confirmed" not in st.session_state:
+    st.session_state["photo_confirmed"] = False
+
+# If no photo yet or user wants to retake → show camera
+if not st.session_state["photo_confirmed"]:
+    st.markdown("### 🎥 Take your photo below")
+    captured_image = st.camera_input("Click **Take Photo** to capture your face")
+
+    if captured_image is not None:
+        st.session_state["captured_image"] = captured_image
+        st.image(captured_image, caption="📸 Captured Preview", width=300)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("✅ Confirm Photo"):
+                st.session_state["photo_confirmed"] = True
+                st.success("📷 Photo confirmed! You can now analyze emotion.")
+        with col2:
+            if st.button("🔁 Retake Photo"):
+                st.session_state["captured_image"] = None
+                st.session_state["photo_confirmed"] = False
+                st.experimental_rerun()
+
+# Once confirmed → show analyze button
+if st.session_state["photo_confirmed"] and st.session_state["captured_image"] is not None:
+    image = Image.open(st.session_state["captured_image"])
+    st.image(image, caption="✅ Confirmed Face Image", width=300)
+
+    gray = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    resized = cv2.resize(gray, (48, 48))
+    img = img_to_array(resized) / 255.0
+    img = np.expand_dims(img, axis=0)
+
     if st.button("🔍 Analyze Emotion"):
-        face_emotion, conf, emoji = predict_face_emotion(image)
-        st.success(f"🧠 Detected Emotion: **{face_emotion.upper()} {emoji} ({conf:.2f}%)**")
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_img:
-            image.save(temp_img.name)
-            st.session_state["face_emotion"] = face_emotion
-            st.session_state["image_path"] = temp_img.name
+        preds = model.predict(img)
+        label = le.inverse_transform([preds.argmax()])[0]
+        conf = np.max(preds) * 100
+        emoji = EMOJI_MAP[label]
+        st.success(f"✅ Emotion: **{label.upper()} {emoji} ({conf:.2f}%)**")
 
-# -------- VOICE UPLOAD --------
+        # Save session data
+        st.session_state["face_emotion"] = label
+        path = "captured_face.jpg"
+        image.save(path)
+        st.session_state["face_image_path"] = path
+
+# ==============================================================
+# 4️⃣ Voice Recording & Analysis
+# ==============================================================
+
 st.markdown("---")
-st.subheader("🎙️ Upload Your Voice Sample (.wav / .mp3 / .m4a / .ogg)")
-uploaded_audio = st.file_uploader("Upload voice file", type=["wav", "mp3", "m4a", "ogg"])
-if uploaded_audio:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-        tmp_audio.write(uploaded_audio.read())
-        tmp_path = tmp_audio.name
+st.subheader("🎙️ Step 2: Record Your Voice")
 
-    st.audio(tmp_path)
+if st.button("🎤 Start 5-second Recording"):
+    voice_file = record_voice()
+    text, voice_emotion = analyze_voice(voice_file)
+    similarity = phrase_similarity(text, ACCESS_PHRASE)
+    st.info(f"🗝️ Access Phrase Match: **{similarity*100:.2f}%**")
 
-    if st.button("🔎 Analyze Voice & Grant Access"):
-        text, voice_emotion = analyze_voice(tmp_path)
-        similarity = phrase_similarity(text, ACCESS_PHRASE)
-        face_emotion = st.session_state.get("face_emotion", "neutral")
-        image_path = st.session_state.get("image_path", None)
+    # ==========================================================
+    # 🧠 Fusion Logic
+    # ==========================================================
+    face_emotion = st.session_state.get("face_emotion")
+    img_path = st.session_state.get("face_image_path")
+    access_granted = (
+        face_emotion
+        and similarity >= SIMILARITY_THRESHOLD
+        and voice_emotion == "calm"
+        and face_emotion in ["happy", "neutral"]
+    )
 
-        # Phrase display
-        st.info(f"🗣️ **Detected Phrase:** “{text or 'Unrecognized'}”")
-        st.info(f"🔑 **Access Phrase Match:** {similarity*100:.2f}%")
+    # ==========================================================
+    # 🎯 Final Summary Card
+    # ==========================================================
+    st.markdown("---")
+    st.markdown("### 🧾 Final Access Summary")
 
-        decision = fusion_decision(face_emotion, voice_emotion, similarity)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Detected Emotion", f"{face_emotion.upper() if face_emotion else 'N/A'} {EMOJI_MAP.get(face_emotion, '')}")
+    col3, col4 = st.columns(2)
+    with col3:
+        st.metric("Phrase", text if text else "Unrecognized")
+    with col4:
+        st.metric("Match %", f"{similarity*100:.2f}")
 
-        summary = f"""
-**🔐 Fusion Access Log**
+    if access_granted:
+        decision = "Access Granted"
+        st.success("✅ ACCESS GRANTED — Emotion & Voice Verified!")
+    else:
+        decision = "Access Denied"
+        st.error("🚫 ACCESS DENIED — Emotion or Voice mismatch.")
 
-🧠 *Face Emotion:* {face_emotion.upper()}
-🎧 *Voice Emotion:* {voice_emotion.upper()}
-🗣️ *Detected Phrase:* {text or 'Unrecognized'}
-🔑 *Phrase Match:* {similarity*100:.2f}%
-📋 *Final Decision:* {"✅ ACCESS GRANTED" if decision else "🚫 ACCESS DENIED"}
-"""
-        send_telegram_alert(summary, image_path)
-        if decision:
-            st.success("✅ ACCESS GRANTED — System Unlocked!")
-        else:
-            st.error("🚫 ACCESS DENIED — Emotion or Voice mismatch.")
-
-    os.remove(tmp_path)
+    # ==========================================================
+    # 🔔 Telegram + CSV Logging
+    # ==========================================================
+    send_telegram_alert(
+        f"{'✅' if access_granted else '🚫'} {decision}\n"
+        f"Emotion: {face_emotion}\nVoice: {voice_emotion}\n"
+        f"Phrase: {text}\nMatch: {similarity*100:.2f}%",
+        img_path,
+    )
+    log_access(face_emotion, text, similarity, decision)

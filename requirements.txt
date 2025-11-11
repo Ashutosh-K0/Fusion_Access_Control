@@ -6,7 +6,9 @@ numpy
 pillow
 librosa
 soundfile
+sounddevice
+SpeechRecognition
 requests
 pydub
-openai-whisper @ git+https://github.com/openai/whisper.git
 ffmpeg-python
+pandas
