@@ -63,12 +63,10 @@ def send_telegram_alert(message, image_path=None):
     """Send alert to Telegram with optional image"""
     try:
         if BOT_TOKEN and CHAT_ID:
-            # Send text
             requests.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                 data={"chat_id": CHAT_ID, "text": message},
             )
-            # Send photo
             if image_path and os.path.exists(image_path):
                 with open(image_path, "rb") as photo:
                     requests.post(
@@ -109,11 +107,14 @@ def analyze_voice(file_path):
         y, sr_rate = librosa.load(file_path, sr=None)
         energy = np.mean(np.abs(y))
         avg_pitch = np.mean(librosa.yin(y, 50, 500, sr=sr_rate))
-        voice_emotion = "calm" if avg_pitch < 200 and energy < 0.05 else "excited"
+        # 🔧 Adjusted thresholds for normal human speech
+        voice_emotion = "calm" if avg_pitch < 250 and energy < 0.08 else "excited"
     except Exception:
         voice_emotion = "unknown"
 
+    st.info(f"🎧 Voice Emotion Estimated: **{voice_emotion.upper()}**")
     return text, voice_emotion
+
 
 def log_access(emotion, phrase, similarity, decision):
     """Append access attempt to CSV log"""
@@ -131,45 +132,22 @@ def log_access(emotion, phrase, similarity, decision):
         df.to_csv(LOG_FILE, index=False)
 
 # ==============================================================
-# 3️⃣ Facial Emotion Detection (with Live Camera + Retake)
+# 3️⃣ Facial Emotion Detection (via Image Upload)
 # ==============================================================
 
-st.subheader("📸 Step 1: Capture Your Face Image (Live)")
+st.subheader("📸 Step 1: Upload Your Face Image")
 
 # Initialize session variables
 if "face_emotion" not in st.session_state:
     st.session_state["face_emotion"] = None
 if "face_image_path" not in st.session_state:
     st.session_state["face_image_path"] = None
-if "captured_image" not in st.session_state:
-    st.session_state["captured_image"] = None
-if "photo_confirmed" not in st.session_state:
-    st.session_state["photo_confirmed"] = False
 
-# If no photo yet or user wants to retake → show camera
-if not st.session_state["photo_confirmed"]:
-    st.markdown("### 🎥 Take your photo below")
-    captured_image = st.camera_input("Click **Take Photo** to capture your face")
+uploaded_image = st.file_uploader("📁 Upload an image file", type=["jpg", "png", "jpeg"])
 
-    if captured_image is not None:
-        st.session_state["captured_image"] = captured_image
-        st.image(captured_image, caption="📸 Captured Preview", width=300)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("✅ Confirm Photo"):
-                st.session_state["photo_confirmed"] = True
-                st.success("📷 Photo confirmed! You can now analyze emotion.")
-        with col2:
-            if st.button("🔁 Retake Photo"):
-                st.session_state["captured_image"] = None
-                st.session_state["photo_confirmed"] = False
-                st.experimental_rerun()
-
-# Once confirmed → show analyze button
-if st.session_state["photo_confirmed"] and st.session_state["captured_image"] is not None:
-    image = Image.open(st.session_state["captured_image"])
-    st.image(image, caption="✅ Confirmed Face Image", width=300)
+if uploaded_image is not None:
+    image = Image.open(uploaded_image)
+    st.image(image, caption="🖼 Uploaded Face Image", width=300)
 
     gray = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
     resized = cv2.resize(gray, (48, 48))
@@ -183,9 +161,8 @@ if st.session_state["photo_confirmed"] and st.session_state["captured_image"] is
         emoji = EMOJI_MAP[label]
         st.success(f"✅ Emotion: **{label.upper()} {emoji} ({conf:.2f}%)**")
 
-        # Save session data
         st.session_state["face_emotion"] = label
-        path = "captured_face.jpg"
+        path = "uploaded_face.jpg"
         image.save(path)
         st.session_state["face_image_path"] = path
 
@@ -205,12 +182,15 @@ if st.button("🎤 Start 5-second Recording"):
     # ==========================================================
     # 🧠 Fusion Logic
     # ==========================================================
+    # ==========================================================
+    # 🧠 Fusion Logic
+    # ==========================================================
     face_emotion = st.session_state.get("face_emotion")
     img_path = st.session_state.get("face_image_path")
     access_granted = (
         face_emotion
         and similarity >= SIMILARITY_THRESHOLD
-        and voice_emotion == "calm"
+        and voice_emotion in ["calm", "unknown"]  # ✅ Now accepts 'unknown'
         and face_emotion in ["happy", "neutral"]
     )
 
@@ -246,3 +226,15 @@ if st.button("🎤 Start 5-second Recording"):
         img_path,
     )
     log_access(face_emotion, text, similarity, decision)
+
+# ==============================================================
+# 5️⃣ Conditional Reset / Clear Session Button
+# ==============================================================
+
+if st.session_state.get("face_emotion") or any(k.startswith("voice") for k in st.session_state.keys()):
+    st.markdown("---")
+    if st.button("🔄 Reset / Clear Session"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.success("🔁 Session cleared! You can start fresh now.")
+        st.rerun()
